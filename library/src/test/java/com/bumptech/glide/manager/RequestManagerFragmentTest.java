@@ -2,7 +2,6 @@ package com.bumptech.glide.manager;
 
 import static org.junit.Assert.assertEquals;
 import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -100,29 +99,6 @@ public class RequestManagerFragmentTest {
   }
 
   @Test
-  public void testCallsRequestManagerOnLowMemory() {
-    runTest(new TestCase() {
-      @Override
-      public void runTest(Harness harness) {
-        RequestManager requestManager = mock(RequestManager.class);
-        harness.setRequestManager(requestManager);
-        harness.onLowMemory();
-        verify(requestManager).onLowMemory();
-      }
-    });
-  }
-
-  @Test
-  public void testNonSupportFragmentCallsOnTrimMemory() {
-    RequestManagerHarness requestManagerHarness = new RequestManagerHarness();
-    int level = 100;
-    RequestManager requestManager = mock(RequestManager.class);
-    requestManagerHarness.setRequestManager(requestManager);
-    requestManagerHarness.onTrimMemory(level);
-    verify(requestManager).onTrimMemory(eq(level));
-  }
-
-  @Test
   public void testOnLowMemoryCallOnNullRequestManagerDoesNotCrash() {
     runTest(new TestCase() {
       @Override
@@ -212,7 +188,7 @@ public class RequestManagerFragmentTest {
 
     @Override
     public ActivityFragmentLifecycle getFragmentLifecycle() {
-      return fragment.getLifecycle();
+      return fragment.getGlideLifecycle();
     }
 
     @Override
@@ -270,7 +246,7 @@ public class RequestManagerFragmentTest {
 
     @Override
     public ActivityFragmentLifecycle getFragmentLifecycle() {
-      return supportFragment.getLifecycle();
+      return supportFragment.getGlideLifecycle();
     }
 
     @Override

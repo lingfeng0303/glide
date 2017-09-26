@@ -17,7 +17,7 @@ import javax.lang.model.element.TypeElement;
  * Runs the final steps of Glide's annotation process and generates the combined
  * {@link AppGlideModule}, {@link com.bumptech.glide.Glide},
  * {@link com.bumptech.glide.RequestManager}, and
- * {@link com.bumptech.glide.request.BaseRequestOptions} classes.
+ * {@link com.bumptech.glide.request.RequestOptions} classes.
  */
 final class AppModuleProcessor {
   private static final String COMPILER_PACKAGE_NAME =
@@ -83,12 +83,9 @@ final class AppModuleProcessor {
     // in a project.
     String generatedCodePackageName = appModule.getEnclosingElement().toString();
 
-    TypeSpec generatedRequestOptions = null;
-    if (!indexedClassNames.extensions.isEmpty()) {
-      generatedRequestOptions =
+    TypeSpec generatedRequestOptions =
           requestOptionsGenerator.generate(generatedCodePackageName, indexedClassNames.extensions);
       writeRequestOptions(generatedCodePackageName, generatedRequestOptions);
-    }
 
     TypeSpec generatedRequestBuilder =
         requestBuilderGenerator.generate(generatedCodePackageName, generatedRequestOptions);

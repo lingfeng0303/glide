@@ -42,7 +42,6 @@ public class RequestManagerRetriever implements Handler.Callback {
   // Hacks based on the implementation of FragmentManagerImpl in the non-support libraries that
   // allow us to iterate over and retrieve all active Fragments in a FragmentManager.
   private static final String FRAGMENT_INDEX_KEY = "key";
-  private static final String FRAGMENT_MANAGER_GET_FRAGMENT_KEY = "i";
 
   /**
    * The top application level RequestManager.
@@ -165,10 +164,9 @@ public class RequestManagerRetriever implements Handler.Callback {
     // Support Fragments.
     if (activity instanceof FragmentActivity) {
       Fragment fragment = findSupportFragment(view, (FragmentActivity) activity);
-      if (fragment == null) {
-        return get(activity);
+      if (fragment != null) {
+        return get(fragment);
       }
-      return get(fragment);
     }
 
     // Standard Fragments.
@@ -186,7 +184,8 @@ public class RequestManagerRetriever implements Handler.Callback {
       return;
     }
     for (Fragment fragment : topLevelFragments) {
-      if (fragment.getView() == null) {
+      // getFragment()s in the support FragmentManager may contain null values, see #1991.
+      if (fragment == null || fragment.getView() == null) {
         continue;
       }
       result.put(fragment.getView(), fragment);
@@ -244,14 +243,29 @@ public class RequestManagerRetriever implements Handler.Callback {
 
   // TODO: Consider using an accessor class in the support library package to more directly retrieve
   // non-support Fragments.
+  @TargetApi(Build.VERSION_CODES.O)
   private void findAllFragmentsWithViews(
+      android.app.FragmentManager fragmentManager, ArrayMap<View, android.app.Fragment> result) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      for (android.app.Fragment fragment : fragmentManager.getFragments()) {
+        if (fragment.getView() != null) {
+          result.put(fragment.getView(), fragment);
+          findAllFragmentsWithViews(fragment.getChildFragmentManager(), result);
+        }
+      }
+    } else {
+      findAllFragmentsWithViewsPreO(fragmentManager, result);
+    }
+  }
+
+  private void findAllFragmentsWithViewsPreO(
       android.app.FragmentManager fragmentManager, ArrayMap<View, android.app.Fragment> result) {
     int index = 0;
     while (true) {
       tempBundle.putInt(FRAGMENT_INDEX_KEY, index++);
       android.app.Fragment fragment = null;
       try {
-        fragment = fragmentManager.getFragment(tempBundle, FRAGMENT_MANAGER_GET_FRAGMENT_KEY);
+        fragment = fragmentManager.getFragment(tempBundle, FRAGMENT_INDEX_KEY);
       } catch (Exception e) {
         // This generates log spam from FragmentManager anyway.
       }
@@ -323,7 +337,7 @@ public class RequestManagerRetriever implements Handler.Callback {
       // TODO(b/27524013): Factor out this Glide.get() call.
       Glide glide = Glide.get(context);
       requestManager =
-          factory.build(glide, current.getLifecycle(), current.getRequestManagerTreeNode());
+          factory.build(glide, current.getGlideLifecycle(), current.getRequestManagerTreeNode());
       current.setRequestManager(requestManager);
     }
     return requestManager;
@@ -354,7 +368,7 @@ public class RequestManagerRetriever implements Handler.Callback {
       // TODO(b/27524013): Factor out this Glide.get() call.
       Glide glide = Glide.get(context);
       requestManager =
-          factory.build(glide, current.getLifecycle(), current.getRequestManagerTreeNode());
+          factory.build(glide, current.getGlideLifecycle(), current.getRequestManagerTreeNode());
       current.setRequestManager(requestManager);
     }
     return requestManager;

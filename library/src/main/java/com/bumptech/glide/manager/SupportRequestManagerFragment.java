@@ -53,7 +53,7 @@ public class SupportRequestManagerFragment extends Fragment {
     this.requestManager = requestManager;
   }
 
-  ActivityFragmentLifecycle getLifecycle() {
+  ActivityFragmentLifecycle getGlideLifecycle() {
     return lifecycle;
   }
 
@@ -186,16 +186,6 @@ public class SupportRequestManagerFragment extends Fragment {
     super.onDestroy();
     lifecycle.onDestroy();
     unregisterFragmentWithRoot();
-  }
-
-  @Override
-  public void onLowMemory() {
-    super.onLowMemory();
-    // If an activity is re-created, onLowMemory may be called before a manager is ever put.
-    // See #329.
-    if (requestManager != null) {
-      requestManager.onLowMemory();
-    }
   }
 
   @Override

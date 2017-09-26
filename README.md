@@ -1,8 +1,8 @@
 Glide
 =====
 
-[![Build Status](https://travis-ci.org/bumptech/glide.svg?branch=master)](https://travis-ci.org/bumptech/glide)
-[Report an issue with Glide][5]
+[![Maven Central](https://maven-badges.herokuapp.com/maven-central/com.github.bumptech.glide/glide/badge.svg)](https://maven-badges.herokuapp.com/maven-central/com.github.bumptech.glide/glide) [![Build Status](https://travis-ci.org/bumptech/glide.svg?branch=master)](https://travis-ci.org/bumptech/glide)
+| [View Glide's documentation][20] | [简体中文文档][22] | [Report an issue with Glide][5]
 
 Glide is a fast and efficient open source media management and image loading framework for Android that wraps media
 decoding, memory and disk caching, and resource pooling into a simple and easy to use interface.
@@ -24,12 +24,13 @@ Or use Gradle:
 
 ```gradle
 repositories {
-  mavenCentral() // jcenter() works as well because it pulls from Maven Central
+  mavenCentral()
+  maven { url 'https://maven.google.com' }
 }
 
 dependencies {
-  compile 'com.github.bumptech.glide:glide:3.7.0'
-  compile 'com.android.support:support-v4:19.1.0'
+  compile 'com.github.bumptech.glide:glide:4.1.1'
+  annotationProcessor 'com.github.bumptech.glide:compiler:4.1.1'
 }
 ```
 
@@ -39,12 +40,18 @@ Or Maven:
 <dependency>
   <groupId>com.github.bumptech.glide</groupId>
   <artifactId>glide</artifactId>
-  <version>3.7.0</version>
+  <version>4.1.1</version>
 </dependency>
 <dependency>
   <groupId>com.google.android</groupId>
   <artifactId>support-v4</artifactId>
   <version>r7</version>
+</dependency>
+<dependency>
+  <groupId>com.github.bumptech.glide</groupId>
+  <artifactId>compiler</artifactId>
+  <version>4.1.1</version>
+  <optional>true</optional>
 </dependency>
 ```
 
@@ -56,6 +63,7 @@ Depending on your ProGuard (DexGuard) config and usage, you may need to include 
 
 ```pro
 -keep public class * implements com.bumptech.glide.module.GlideModule
+-keep public class * extends com.bumptech.glide.AppGlideModule
 -keep public enum com.bumptech.glide.load.resource.bitmap.ImageHeaderParser$** {
   **[] $VALUES;
   public *;
@@ -67,9 +75,11 @@ Depending on your ProGuard (DexGuard) config and usage, you may need to include 
 
 How do I use Glide?
 -------------------
-Checkout the [GitHub wiki][2] for pages on a variety of topics, and see the [javadocs][3].
+Check out the [documentation][20] for pages on a variety of topics, and see the [javadocs][3].
 
-Simple use cases will look something like this:
+For Glide v3, see the [wiki][2].
+
+Simple use cases with Glide's [generated API][21] will look something like this:
 
 ```java
 // For a simple view:
@@ -77,7 +87,7 @@ Simple use cases will look something like this:
   ...
   ImageView imageView = (ImageView) findViewById(R.id.my_image_view);
 
-  Glide.with(this).load("http://goo.gl/gEgYUd").into(imageView);
+  GlideApp.with(this).load("http://goo.gl/gEgYUd").into(imageView);
 }
 
 // For a simple image list:
@@ -91,12 +101,11 @@ Simple use cases will look something like this:
 
   String url = myUrls.get(position);
 
-  Glide
+  GlideApp
     .with(myFragment)
     .load(url)
     .centerCrop()
     .placeholder(R.drawable.loading_spinner)
-    .crossFade()
     .into(myImageView);
 
   return myImageView;
@@ -105,15 +114,17 @@ Simple use cases will look something like this:
 
 Status
 ------
-[*Version 3* on the `3.0` branch][14] is a stable public release used in multiple open source projects at Google including in the Android Camera
-app and in the 2014 Google IO app. *Version 4* is currently under development on the `master` branch.
+Version 4 is now released and stable. Updates are currently released at least monthly with new features and bug fixes.
 
 Comments/bugs/questions/pull requests are always welcome! Please read [CONTRIBUTING.md][5] on how to report issues.
 
 Compatibility
 -------------
 
- * **Android SDK**: Glide requires a minimum API level of 10.
+ * **Minimum Android SDK**: Glide requires a minimum API level of 14.
+ * **Compile Android SDK**: Glide requires you to compile against API 26.
+
+ If you need to support older versions, consider staying on [Glide v3][14], which works on API 10, but not actively maintained.
  * **OkHttp 2.x**: there are optional dependencies available called `okhttp-integration`, see [Integration Libraries][12] wiki page.
  * **OkHttp 3.x**: there are optional dependencies available called `okhttp3-integration`, see [Integration Libraries][12] wiki page.
  * **Volley**: there are optional dependencies available called `volley-integration`, see [Integration Libraries][12] wiki page.
@@ -136,12 +147,13 @@ variable is pointing at the SDK or add a `local.properties` file in the root pro
 
 Samples
 -------
-Follow the steps in the [Build](#build) section to setup the project and then:
+Follow the steps in the [Build](#build) section to set up the project and then:
 
 ```shell
 ./gradlew :samples:flickr:run
 ./gradlew :samples:giphy:run
 ./gradlew :samples:svg:run
+./gradlew :samples:contacturi:run
 ```
 You may also find precompiled APKs on the [releases page][1].
 
@@ -188,7 +200,7 @@ This is not an official Google product.
 
 [1]: https://github.com/bumptech/glide/releases
 [2]: https://github.com/bumptech/glide/wiki
-[3]: http://bumptech.github.io/glide/javadocs/latest/index.html
+[3]: http://bumptech.github.io/glide/ref/javadocs.html
 [4]: https://www.jetbrains.com/idea/download/
 [5]: https://github.com/bumptech/glide/blob/master/CONTRIBUTING.md
 [6]: https://groups.google.com/forum/#!forum/glidelibrary
@@ -205,3 +217,6 @@ This is not an official Google product.
 [17]: https://github.com/bumptech/glide/wiki/Snapshots
 [18]: https://github.com/bumptech/glide/issues?q=is%3Aissue+CircleImageView+OR+CircularImageView+OR+RoundedImageView
 [19]: https://github.com/wasabeef/glide-transformations
+[20]: http://bumptech.github.io/glide/
+[21]: http://bumptech.github.io/glide/doc/generatedapi.html
+[22]: https://muyangmin.github.io/glide-docs-cn/

@@ -80,6 +80,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -92,6 +93,7 @@ public class Glide implements ComponentCallbacks2 {
   private static final String DEFAULT_DISK_CACHE_DIR = "image_manager_disk_cache";
   private static final String TAG = "Glide";
   private static volatile Glide glide;
+  private static volatile boolean isInitializing;
 
   private final Engine engine;
   private final BitmapPool bitmapPool;
@@ -151,7 +153,7 @@ public class Glide implements ComponentCallbacks2 {
     if (glide == null) {
       synchronized (Glide.class) {
         if (glide == null) {
-          initGlide(context);
+          checkAndInitializeGlide(context);
         }
       }
     }
@@ -159,18 +161,30 @@ public class Glide implements ComponentCallbacks2 {
     return glide;
   }
 
+  private static void checkAndInitializeGlide(Context context) {
+    // In the thread running initGlide(), one or more classes may call Glide.get(context).
+    // Without this check, those calls could trigger infinite recursion.
+    if (isInitializing) {
+      throw new IllegalStateException("You cannot call Glide.get() in registerComponents(),"
+          + " use the provided Glide instance instead");
+    }
+    isInitializing = true;
+    initializeGlide(context);
+    isInitializing = false;
+  }
+
   @VisibleForTesting
-  public static void init(Glide glide) {
+  public static synchronized void init(Glide glide) {
     Glide.glide = glide;
   }
 
   @VisibleForTesting
-  public static void tearDown() {
+  public static synchronized void tearDown() {
     glide = null;
   }
 
   @SuppressWarnings("deprecation")
-  private static void initGlide(Context context) {
+  private static void initializeGlide(Context context) {
     Context applicationContext = context.getApplicationContext();
 
     GeneratedAppGlideModule annotationGeneratedModule = getAnnotationGeneratedGlideModules();
@@ -212,17 +226,19 @@ public class Glide implements ComponentCallbacks2 {
     if (annotationGeneratedModule != null) {
       annotationGeneratedModule.applyOptions(applicationContext, builder);
     }
-    glide = builder.build(applicationContext);
+    Glide glide = builder.build(applicationContext);
     for (GlideModule module : manifestModules) {
-      module.registerComponents(applicationContext, glide.registry);
+      module.registerComponents(applicationContext, glide, glide.registry);
     }
     if (annotationGeneratedModule != null) {
-      annotationGeneratedModule.registerComponents(applicationContext, glide.registry);
+      annotationGeneratedModule.registerComponents(applicationContext, glide, glide.registry);
     }
+    context.getApplicationContext().registerComponentCallbacks(glide);
+    Glide.glide = glide;
   }
 
   @Nullable
-  @SuppressWarnings({"unchecked", "deprecation"})
+  @SuppressWarnings({"unchecked", "deprecation", "TryWithIdenticalCatches"})
   private static GeneratedAppGlideModule getAnnotationGeneratedGlideModules() {
     GeneratedAppGlideModule result = null;
     try {
@@ -241,6 +257,7 @@ public class Glide implements ComponentCallbacks2 {
       throw new IllegalStateException("GeneratedAppGlideModuleImpl is implemented incorrectly."
           + " If you've manually implemented this class, remove your implementation. The Annotation"
           + " processor will generate a correct implementation.", e);
+      // These exceptions can't be squashed across all versions of Android.
     } catch (IllegalAccessException e) {
       throw new IllegalStateException("GeneratedAppGlideModuleImpl is implemented incorrectly."
           + " If you've manually implemented this class, remove your implementation. The Annotation"
@@ -259,7 +276,8 @@ public class Glide implements ComponentCallbacks2 {
       RequestManagerRetriever requestManagerRetriever,
       ConnectivityMonitorFactory connectivityMonitorFactory,
       int logLevel,
-      RequestOptions defaultRequestOptions) {
+      RequestOptions defaultRequestOptions,
+      Map<Class<?>, TransitionOptions<?, ?>> defaultTransitionOptions) {
     this.engine = engine;
     this.bitmapPool = bitmapPool;
     this.arrayPool = arrayPool;
@@ -280,39 +298,44 @@ public class Glide implements ComponentCallbacks2 {
     ByteBufferGifDecoder byteBufferGifDecoder =
         new ByteBufferGifDecoder(context, registry.getImageHeaderParsers(), bitmapPool, arrayPool);
 
-    registry.register(ByteBuffer.class, new ByteBufferEncoder())
-        .register(InputStream.class, new StreamEncoder(arrayPool))
+    registry
+        .append(ByteBuffer.class, new ByteBufferEncoder())
+        .append(InputStream.class, new StreamEncoder(arrayPool))
         /* Bitmaps */
-        .append(ByteBuffer.class, Bitmap.class,
+        .append(Registry.BUCKET_BITMAP, ByteBuffer.class, Bitmap.class,
             new ByteBufferBitmapDecoder(downsampler))
-        .append(InputStream.class, Bitmap.class,
+        .append(Registry.BUCKET_BITMAP, InputStream.class, Bitmap.class,
             new StreamBitmapDecoder(downsampler, arrayPool))
-        .append(ParcelFileDescriptor.class, Bitmap.class, new VideoBitmapDecoder(bitmapPool))
-        .register(Bitmap.class, new BitmapEncoder())
+        .append(Registry.BUCKET_BITMAP, ParcelFileDescriptor.class, Bitmap.class,
+            new VideoBitmapDecoder(bitmapPool))
+        .append(Bitmap.class, new BitmapEncoder())
         /* GlideBitmapDrawables */
-        .append(ByteBuffer.class, BitmapDrawable.class,
+        .append(Registry.BUCKET_BITMAP_DRAWABLE, ByteBuffer.class, BitmapDrawable.class,
             new BitmapDrawableDecoder<>(resources, bitmapPool,
                 new ByteBufferBitmapDecoder(downsampler)))
-        .append(InputStream.class, BitmapDrawable.class,
+        .append(Registry.BUCKET_BITMAP_DRAWABLE, InputStream.class, BitmapDrawable.class,
             new BitmapDrawableDecoder<>(resources, bitmapPool,
                 new StreamBitmapDecoder(downsampler, arrayPool)))
-        .append(ParcelFileDescriptor.class, BitmapDrawable.class,
+        .append(Registry.BUCKET_BITMAP_DRAWABLE, ParcelFileDescriptor.class, BitmapDrawable.class,
             new BitmapDrawableDecoder<>(resources, bitmapPool, new VideoBitmapDecoder(bitmapPool)))
-        .register(BitmapDrawable.class, new BitmapDrawableEncoder(bitmapPool, new BitmapEncoder()))
+        .append(BitmapDrawable.class, new BitmapDrawableEncoder(bitmapPool, new BitmapEncoder()))
         /* GIFs */
-        .prepend(InputStream.class, GifDrawable.class,
+        .append(Registry.BUCKET_GIF, InputStream.class, GifDrawable.class,
             new StreamGifDecoder(registry.getImageHeaderParsers(), byteBufferGifDecoder, arrayPool))
-        .prepend(ByteBuffer.class, GifDrawable.class, byteBufferGifDecoder)
-        .register(GifDrawable.class, new GifDrawableEncoder())
+        .append(Registry.BUCKET_GIF, ByteBuffer.class, GifDrawable.class, byteBufferGifDecoder)
+        .append(GifDrawable.class, new GifDrawableEncoder())
         /* GIF Frames */
+        // Compilation with Gradle requires the type to be specified for UnitModelLoader here.
         .append(GifDecoder.class, GifDecoder.class, new UnitModelLoader.Factory<GifDecoder>())
-        .append(GifDecoder.class, Bitmap.class, new GifFrameResourceDecoder(bitmapPool))
+        .append(Registry.BUCKET_BITMAP, GifDecoder.class, Bitmap.class,
+            new GifFrameResourceDecoder(bitmapPool))
         /* Files */
         .register(new ByteBufferRewinder.Factory())
         .append(File.class, ByteBuffer.class, new ByteBufferFileLoader.Factory())
         .append(File.class, InputStream.class, new FileLoader.StreamFactory())
         .append(File.class, File.class, new FileDecoder())
         .append(File.class, ParcelFileDescriptor.class, new FileLoader.FileDescriptorFactory())
+        // Compilation with Gradle requires the type to be specified for UnitModelLoader here.
         .append(File.class, File.class, new UnitModelLoader.Factory<File>())
         /* Models */
         .register(new InputStreamRewinder.Factory(arrayPool))
@@ -356,8 +379,10 @@ public class Glide implements ComponentCallbacks2 {
         .register(GifDrawable.class, byte[].class, new GifDrawableBytesTranscoder());
 
     ImageViewTargetFactory imageViewTargetFactory = new ImageViewTargetFactory();
-    glideContext = new GlideContext(context, registry, imageViewTargetFactory,
-        defaultRequestOptions, engine, this, logLevel);
+    glideContext =
+        new GlideContext(
+            context, registry, imageViewTargetFactory, defaultRequestOptions,
+            defaultTransitionOptions, engine, logLevel);
   }
 
   /**
@@ -467,6 +492,7 @@ public class Glide implements ComponentCallbacks2 {
    *     This method should always be called on a background thread, since it is a blocking call.
    * </p>
    */
+  @SuppressWarnings("unused") // Public API
   public void clearDiskCache() {
     Util.assertBackgroundThread();
     engine.clearDiskCache();
@@ -507,6 +533,7 @@ public class Glide implements ComponentCallbacks2 {
     // Context could be null for other reasons (ie the user passes in null), but in practice it will
     // only occur due to errors with the Fragment lifecycle.
     Preconditions.checkNotNull(
+        context,
         "You cannot start a load on a not yet attached View or a  Fragment where getActivity() "
             + "returns null (which usually occurs when getActivity() is called before the Fragment "
             + "is attached or after the Fragment is destroyed).");

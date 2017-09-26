@@ -2,8 +2,11 @@ package com.bumptech.glide.request;
 
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
+import android.support.annotation.DrawableRes;
+import android.support.annotation.Nullable;
 import android.support.v4.content.res.ResourcesCompat;
 import android.support.v4.util.Pools;
+import android.support.v7.content.res.AppCompatResources;
 import android.util.Log;
 import com.bumptech.glide.GlideContext;
 import com.bumptech.glide.Priority;
@@ -42,6 +45,7 @@ public final class SingleRequest<R> implements Request,
           return new SingleRequest<Object>();
         }
       });
+  private boolean isCallingCallbacks;
 
   private enum Status {
     /**
@@ -78,14 +82,15 @@ public final class SingleRequest<R> implements Request,
     PAUSED,
   }
 
-  private final String tag = String.valueOf(hashCode());
+  private final String tag = String.valueOf(super.hashCode());
   private final StateVerifier stateVerifier = StateVerifier.newInstance();
 
   private RequestCoordinator requestCoordinator;
   private GlideContext glideContext;
+  @Nullable
   private Object model;
   private Class<R> transcodeClass;
-  private BaseRequestOptions<?> requestOptions;
+  private RequestOptions requestOptions;
   private int overrideWidth;
   private int overrideHeight;
   private Priority priority;
@@ -102,12 +107,13 @@ public final class SingleRequest<R> implements Request,
   private Drawable fallbackDrawable;
   private int width;
   private int height;
+  private static boolean shouldCallAppCompatResources = true;
 
   public static <R> SingleRequest<R> obtain(
       GlideContext glideContext,
       Object model,
       Class<R> transcodeClass,
-      BaseRequestOptions<?> requestOptions,
+      RequestOptions requestOptions,
       int overrideWidth,
       int overrideHeight,
       Priority priority,
@@ -146,7 +152,7 @@ public final class SingleRequest<R> implements Request,
       GlideContext glideContext,
       Object model,
       Class<R> transcodeClass,
-      BaseRequestOptions<?> requestOptions,
+      RequestOptions requestOptions,
       int overrideWidth,
       int overrideHeight,
       Priority priority,
@@ -177,6 +183,7 @@ public final class SingleRequest<R> implements Request,
 
   @Override
   public void recycle() {
+    assertNotCallingCallbacks();
     glideContext = null;
     model = null;
     transcodeClass = null;
@@ -198,6 +205,7 @@ public final class SingleRequest<R> implements Request,
 
   @Override
   public void begin() {
+    assertNotCallingCallbacks();
     stateVerifier.throwIfRecycled();
     startTime = LogTime.getLogTime();
     if (model == null) {
@@ -211,6 +219,24 @@ public final class SingleRequest<R> implements Request,
       onLoadFailed(new GlideException("Received null model"), logLevel);
       return;
     }
+
+    if (status == Status.RUNNING) {
+      throw new IllegalArgumentException("Cannot restart a running request");
+    }
+
+    // If we're restarted after we're complete (usually via something like a notifyDataSetChanged
+    // that starts an identical request into the same Target or View), we can simply use the
+    // resource and size we retrieved the last time around and skip obtaining a new size, starting a
+    // new load etc. This does mean that users who want to restart a load because they expect that
+    // the view size has changed will need to explicitly clear the View or Target before starting
+    // the new load.
+    if (status == Status.COMPLETE) {
+      onResourceReady(resource, DataSource.MEMORY_CACHE);
+      return;
+    }
+
+    // Restarts for requests that are neither complete nor running can be treated as new requests
+    // and can run again from the beginning.
 
     status = Status.WAITING_FOR_SIZE;
     if (Util.isValidDimensions(overrideWidth, overrideHeight)) {
@@ -237,11 +263,22 @@ public final class SingleRequest<R> implements Request,
    * @see #clear()
    */
   void cancel() {
+    assertNotCallingCallbacks();
     stateVerifier.throwIfRecycled();
+    target.removeCallback(this);
     status = Status.CANCELLED;
     if (loadStatus != null) {
       loadStatus.cancel();
       loadStatus = null;
+    }
+  }
+
+  // Avoids difficult to understand errors like #2413.
+  private void assertNotCallingCallbacks() {
+    if (isCallingCallbacks) {
+      throw new IllegalStateException("You can't start or clear loads in RequestListener or"
+          + " Target callbacks. If you must do so, consider posting your into() or clear() calls"
+          + " to the main thread using a Handler instead.");
     }
   }
 
@@ -256,6 +293,7 @@ public final class SingleRequest<R> implements Request,
   @Override
   public void clear() {
     Util.assertMainThread();
+    assertNotCallingCallbacks();
     if (status == Status.CLEARED) {
       return;
     }
@@ -342,7 +380,28 @@ public final class SingleRequest<R> implements Request,
     return fallbackDrawable;
   }
 
-  private Drawable loadDrawable(int resourceId) {
+  private Drawable loadDrawable(@DrawableRes int resourceId) {
+    if (shouldCallAppCompatResources) {
+      return loadDrawableV7(resourceId);
+    } else {
+      return loadDrawableBase(resourceId);
+    }
+  }
+
+  /**
+   * Tries to load the drawable thanks to AppCompatResources.<br>
+   * This allows to parse VectorDrawables on legacy devices if the appcompat v7 is in the classpath.
+   */
+  private Drawable loadDrawableV7(@DrawableRes int resourceId) {
+    try {
+      return AppCompatResources.getDrawable(glideContext, resourceId);
+    } catch (NoClassDefFoundError error) {
+      shouldCallAppCompatResources = false;
+      return loadDrawableBase(resourceId);
+    }
+  }
+
+  private Drawable loadDrawableBase(@DrawableRes int resourceId) {
     Resources resources = glideContext.getResources();
     return ResourcesCompat.getDrawable(resources, resourceId, requestOptions.getTheme());
   }
@@ -352,7 +411,15 @@ public final class SingleRequest<R> implements Request,
       return;
     }
 
-    Drawable error = model == null ? getFallbackDrawable() : getErrorDrawable();
+    Drawable error = null;
+    if (model == null) {
+      error = getFallbackDrawable();
+    }
+    // Either the model isn't null, or there was no fallback drawable set.
+    if (error == null) {
+      error = getErrorDrawable();
+    }
+    // The model isn't null, no fallback drawable was set or no error drawable was set.
     if (error == null) {
       error = getPlaceholderDrawable();
     }
@@ -392,6 +459,7 @@ public final class SingleRequest<R> implements Request,
         requestOptions.getDiskCacheStrategy(),
         requestOptions.getTransformations(),
         requestOptions.isTransformationRequired(),
+        requestOptions.isScaleOnlyOrNoTransform(),
         requestOptions.getOptions(),
         requestOptions.isMemoryCacheable(),
         requestOptions.getUseUnlimitedSourceGeneratorsPool(),
@@ -481,11 +549,16 @@ public final class SingleRequest<R> implements Request,
           + LogTime.getElapsedMillis(startTime) + " ms");
     }
 
-    if (requestListener == null
-        || !requestListener.onResourceReady(result, model, target, dataSource, isFirstResource)) {
-      Transition<? super R> animation =
-          animationFactory.build(dataSource, isFirstResource);
-      target.onResourceReady(result, animation);
+    isCallingCallbacks = true;
+    try {
+      if (requestListener == null
+          || !requestListener.onResourceReady(result, model, target, dataSource, isFirstResource)) {
+        Transition<? super R> animation =
+            animationFactory.build(dataSource, isFirstResource);
+        target.onResourceReady(result, animation);
+      }
+    } finally {
+      isCallingCallbacks = false;
     }
 
     notifyLoadSuccess();
@@ -511,11 +584,31 @@ public final class SingleRequest<R> implements Request,
 
     loadStatus = null;
     status = Status.FAILED;
-    //TODO: what if this is a thumbnail request?
-    if (requestListener == null || !requestListener.onLoadFailed(e, model, target,
-        isFirstReadyResource())) {
-      setErrorPlaceholder();
+
+    isCallingCallbacks = true;
+    try {
+      //TODO: what if this is a thumbnail request?
+      if (requestListener == null
+          || !requestListener.onLoadFailed(e, model, target, isFirstReadyResource())) {
+        setErrorPlaceholder();
+      }
+    } finally {
+      isCallingCallbacks = false;
     }
+  }
+
+  @Override
+  public boolean isEquivalentTo(Request o) {
+    if (o instanceof SingleRequest) {
+      SingleRequest that = (SingleRequest) o;
+      return overrideWidth == that.overrideWidth
+          && overrideHeight == that.overrideHeight
+          && Util.bothModelsNullEquivalentOrEquals(model, that.model)
+          && transcodeClass.equals(that.transcodeClass)
+          && requestOptions.equals(that.requestOptions)
+          && priority == that.priority;
+    }
+    return false;
   }
 
   private void logV(String message) {

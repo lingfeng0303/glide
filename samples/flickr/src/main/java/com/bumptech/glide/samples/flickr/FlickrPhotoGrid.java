@@ -1,14 +1,10 @@
 package com.bumptech.glide.samples.flickr;
 
-import static com.bumptech.glide.GenericTransitionOptions.withNoTransition;
-import static com.bumptech.glide.request.RequestOptions.centerCropTransform;
-import static com.bumptech.glide.request.RequestOptions.diskCacheStrategyOf;
-import static com.bumptech.glide.request.RequestOptions.priorityOf;
-
 import android.content.Intent;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
 import android.support.v4.app.Fragment;
 import android.support.v7.widget.GridLayoutManager;
 import android.support.v7.widget.RecyclerView;
@@ -21,7 +17,6 @@ import com.bumptech.glide.ListPreloader;
 import com.bumptech.glide.Priority;
 import com.bumptech.glide.RequestBuilder;
 import com.bumptech.glide.integration.recyclerview.RecyclerViewPreloader;
-import com.bumptech.glide.load.engine.DiskCacheStrategy;
 import com.bumptech.glide.samples.flickr.api.Api;
 import com.bumptech.glide.samples.flickr.api.Photo;
 import com.bumptech.glide.util.FixedPreloadSizeProvider;
@@ -44,9 +39,9 @@ public class FlickrPhotoGrid extends Fragment implements PhotoViewer {
   private int photoSize;
   private RecyclerView grid;
   private boolean thumbnail;
-  private RequestBuilder<Drawable> fullRequest;
-  private RequestBuilder<Drawable> thumbnailRequest;
-  private RequestBuilder<Drawable> preloadRequest;
+  private GlideRequest<Drawable> fullRequest;
+  private GlideRequest<Drawable> thumbnailRequest;
+  private GlideRequest<Drawable> preloadRequest;
   private GridLayoutManager layoutManager;
 
   public static FlickrPhotoGrid newInstance(int size, int preloadCount, boolean thumbnail) {
@@ -66,19 +61,17 @@ public class FlickrPhotoGrid extends Fragment implements PhotoViewer {
     photoSize = args.getInt(IMAGE_SIZE_KEY);
     thumbnail = args.getBoolean(THUMBNAIL_KEY);
 
-    fullRequest = Glide.with(this)
+    fullRequest = GlideApp.with(this)
         .asDrawable()
-        .transition(withNoTransition())
-        .apply(centerCropTransform());
+        .centerCrop();
 
-    thumbnailRequest = Glide.with(this)
+    thumbnailRequest = GlideApp.with(this)
         .asDrawable()
-        .transition(withNoTransition())
-        .apply(diskCacheStrategyOf(DiskCacheStrategy.DATA).centerCrop()
-            .override(Api.SQUARE_THUMB_SIZE));
+        .centerCrop()
+        .override(Api.SQUARE_THUMB_SIZE);
 
     preloadRequest =
-        thumbnail ? thumbnailRequest.clone().apply(priorityOf(Priority.HIGH)) : fullRequest;
+        thumbnail ? thumbnailRequest.clone().priority(Priority.HIGH) : fullRequest;
 
     final View result = inflater.inflate(R.layout.flickr_photo_grid, container, false);
 
@@ -99,7 +92,7 @@ public class FlickrPhotoGrid extends Fragment implements PhotoViewer {
       @Override
       public void onViewRecycled(RecyclerView.ViewHolder holder) {
         PhotoViewHolder photoViewHolder = (PhotoViewHolder) holder;
-        Glide.with(FlickrPhotoGrid.this).clear(photoViewHolder.imageView);
+        GlideApp.with(FlickrPhotoGrid.this).clear(photoViewHolder.imageView);
       }
     });
 
@@ -199,11 +192,13 @@ public class FlickrPhotoGrid extends Fragment implements PhotoViewer {
       return photos.size();
     }
 
+    @NonNull
     @Override
     public List<Photo> getPreloadItems(int position) {
       return photos.subList(position, position + 1);
     }
 
+    @NonNull
     @Override
     public RequestBuilder<Drawable> getPreloadRequestBuilder(Photo item) {
       return preloadRequest.load(item);

@@ -13,10 +13,12 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.view.View;
 import android.view.ViewTreeObserver;
+import android.view.WindowManager;
 import com.bumptech.glide.request.Request;
 import com.bumptech.glide.request.transition.Transition;
 import com.bumptech.glide.tests.Util;
@@ -31,10 +33,12 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.shadow.api.Shadow;
+import org.robolectric.shadows.ShadowDisplay;
 import org.robolectric.shadows.ShadowView;
 
 @RunWith(RobolectricTestRunner.class)
@@ -63,6 +67,7 @@ public class ViewTargetTest {
   @After
   public void tearDown() {
     Util.setSdkVersionInt(sdkVersion);
+    ViewTarget.SizeDeterminer.maxDisplayLength = null;
   }
 
   @Test
@@ -123,45 +128,53 @@ public class ViewTargetTest {
   }
 
   @Test
-  public void getSize_withBothWrapContent_returnsSizeOriginal() {
+  public void getSize_withBothWrapContent_usesDisplayDimens() {
     LayoutParams layoutParams =
         new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
     view.setLayoutParams(layoutParams);
     shadowView.setIsLaidOut(true);
 
+    setDisplayDimens(200, 300);
+
     target.getSize(cb);
 
-    verify(cb).onSizeReady(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL);
+    verify(cb).onSizeReady(300, 300);
   }
 
   @Test
-  public void getSize_withWrapContentWidthAndValidHeight_usesSizeOriginalWidthValidHeight() {
+  public void getSize_withWrapContentWidthAndValidHeight_usesDisplayDimenAndValidHeight() {
     int height = 100;
     LayoutParams params = new LayoutParams(LayoutParams.WRAP_CONTENT, height);
     view.setLayoutParams(params);
     shadowView.setIsLaidOut(true);
 
+    setDisplayDimens(100, 200);
+
     target.getSize(cb);
 
-    verify(cb).onSizeReady(Target.SIZE_ORIGINAL, height);
+    verify(cb).onSizeReady(200, height);
   }
 
   @Test
-  public void getSize_withWrapContentHeightAndValidWidth_returnsWidthAndSizeOriginalHeight() {
+  public void getSize_withWrapContentHeightAndValidWidth_returnsWidthAndDisplayDimen() {
     int width = 100;
     LayoutParams params = new LayoutParams(width, LayoutParams.WRAP_CONTENT);
     view.setLayoutParams(params);
     shadowView.setIsLaidOut(true);
 
+    setDisplayDimens(200, 100);
+
     target.getSize(cb);
 
-    verify(cb).onSizeReady(width, Target.SIZE_ORIGINAL);
+    verify(cb).onSizeReady(width, 200);
   }
 
   @Test
-  public void getSize_withWrapContentWidthAndMatchParentHeight_usesSizeOriginalWidthAndHeight() {
+  public void getSize_withWrapContentWidthAndMatchParentHeight_usesDisplayDimenWidthAndHeight() {
     LayoutParams params = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT);
     view.setLayoutParams(params);
+
+    setDisplayDimens(500, 600);
 
     target.getSize(cb);
 
@@ -174,17 +187,20 @@ public class ViewTargetTest {
 
     shadowObserver.fireOnPreDrawListeners();
 
-    verify(cb).onSizeReady(Target.SIZE_ORIGINAL, height);
+    verify(cb).onSizeReady(600, height);
   }
 
   @Test
-  public void getSize_withMatchParentWidthAndWrapContentHeight_usesWidthAndSizeOriginalHeight() {
+  public void getSize_withMatchParentWidthAndWrapContentHeight_usesWidthAndDisplayDimenHeight() {
     LayoutParams params = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
     view.setLayoutParams(params);
+
+    setDisplayDimens(300, 400);
 
     target.getSize(cb);
 
     verify(cb, never()).onSizeReady(anyInt(), anyInt());
+
 
     int width = 32;
     shadowView
@@ -192,7 +208,7 @@ public class ViewTargetTest {
         .setIsLaidOut(true);
     shadowObserver.fireOnPreDrawListeners();
 
-    verify(cb).onSizeReady(width, Target.SIZE_ORIGINAL);
+    verify(cb).onSizeReady(width, 400);
   }
 
   @Test
@@ -380,14 +396,14 @@ public class ViewTargetTest {
   }
 
   @Test
-  public void getSize_withValidWidthAndHeight_notLaidOut_doesNotCallSizeReady() {
+  public void getSize_withValidWidthAndHeight_notLaidOut_notLayoutRequested_callsSizeReady() {
     shadowView
         .setWidth(100)
         .setHeight(100)
         .setIsLaidOut(false);
     target.getSize(cb);
 
-    verify(cb, never()).onSizeReady(anyInt(), anyInt());
+    verify(cb).onSizeReady(100, 100);
   }
 
   @Test
@@ -403,7 +419,7 @@ public class ViewTargetTest {
   }
 
   @Test
-  public void getSize_withLayoutParams_zeroWidthHeight_notLaidOut_doesNotCallSizeReady() {
+  public void getSize_withLayoutParams_emptyParams_notLaidOutOrLayoutRequested_callsSizeReady() {
     shadowView
         .setLayoutParams(new LayoutParams(0, 0))
         .setWidth(100)
@@ -411,11 +427,11 @@ public class ViewTargetTest {
         .setIsLaidOut(false);
     target.getSize(cb);
 
-    verify(cb, never()).onSizeReady(anyInt(), anyInt());
+    verify(cb).onSizeReady(100, 100);
   }
 
   @Test
-  public void getSize_withValidWidthAndHeight_preV19_layoutRequested_doesNotCallSizeReady() {
+  public void getSize_withValidWidthAndHeight_preV19_layoutRequested_callsSizeReady() {
     Util.setSdkVersionInt(18);
     shadowView
         .setWidth(100)
@@ -424,7 +440,7 @@ public class ViewTargetTest {
 
     target.getSize(cb);
 
-    verify(cb, never()).onSizeReady(anyInt(), anyInt());
+    verify(cb).onSizeReady(100, 100);
   }
 
   @Test
@@ -439,6 +455,19 @@ public class ViewTargetTest {
     target.getSize(cb);
 
     verify(cb, never()).onSizeReady(anyInt(), anyInt());
+  }
+
+  private void setDisplayDimens(Integer width, Integer height) {
+    WindowManager windowManager =
+        (WindowManager) RuntimeEnvironment.application.getSystemService(Context.WINDOW_SERVICE);
+    ShadowDisplay shadowDisplay = Shadows.shadowOf(windowManager.getDefaultDisplay());
+    if (width != null) {
+      shadowDisplay.setWidth(width);
+    }
+
+    if (height != null) {
+      shadowDisplay.setHeight(height);
+    }
   }
 
   @Implements(ViewTreeObserver.class)

@@ -1,5 +1,7 @@
 package com.bumptech.glide.load.engine;
 
+import android.os.Build;
+import android.support.v4.os.TraceCompat;
 import android.support.v4.util.Pools;
 import android.util.Log;
 import com.bumptech.glide.GlideContext;
@@ -14,7 +16,9 @@ import com.bumptech.glide.load.Transformation;
 import com.bumptech.glide.load.data.DataFetcher;
 import com.bumptech.glide.load.data.DataRewinder;
 import com.bumptech.glide.load.engine.cache.DiskCache;
+import com.bumptech.glide.load.resource.bitmap.Downsampler;
 import com.bumptech.glide.util.LogTime;
+import com.bumptech.glide.util.Preconditions;
 import com.bumptech.glide.util.Synthetic;
 import com.bumptech.glide.util.pool.FactoryPools.Poolable;
 import com.bumptech.glide.util.pool.StateVerifier;
@@ -89,6 +93,7 @@ class DecodeJob<R> implements DataFetcherGenerator.FetcherReadyCallback,
       DiskCacheStrategy diskCacheStrategy,
       Map<Class<?>, Transformation<?>> transformations,
       boolean isTransformationRequired,
+      boolean isScaleOnlyOrNoTransform,
       boolean onlyRetrieveFromCache,
       Options options,
       Callback<R> callback,
@@ -106,6 +111,7 @@ class DecodeJob<R> implements DataFetcherGenerator.FetcherReadyCallback,
         options,
         transformations,
         isTransformationRequired,
+        isScaleOnlyOrNoTransform,
         diskCacheProvider);
     this.glideContext = glideContext;
     this.signature = signature;
@@ -212,6 +218,10 @@ class DecodeJob<R> implements DataFetcherGenerator.FetcherReadyCallback,
     // This should be much more fine grained, but since Java's thread pool implementation silently
     // swallows all otherwise fatal exceptions, this will at least make it obvious to developers
     // that something is failing.
+    TraceCompat.beginSection("DecodeJob#run");
+    // Methods in the try statement can invalidate currentFetcher, so set a local variable here to
+    // ensure that the fetcher is cleaned up either way.
+    DataFetcher<?> localFetcher = currentFetcher;
     try {
       if (isCancelled) {
         notifyFailed();
@@ -231,6 +241,14 @@ class DecodeJob<R> implements DataFetcherGenerator.FetcherReadyCallback,
       if (!isCancelled) {
         throw e;
       }
+    } finally {
+      Preconditions.checkArgument(
+          localFetcher == null || currentFetcher == null || localFetcher.equals(currentFetcher),
+          "Fetchers don't match!, old: " + localFetcher + " new: " + currentFetcher);
+      if (localFetcher != null) {
+        localFetcher.cleanup();
+      }
+      TraceCompat.endSection();
     }
   }
 
@@ -347,7 +365,12 @@ class DecodeJob<R> implements DataFetcherGenerator.FetcherReadyCallback,
       runReason = RunReason.DECODE_DATA;
       callback.reschedule(this);
     } else {
-      decodeFromRetrievedData();
+      TraceCompat.beginSection("DecodeJob.decodeFromRetrievedData");
+      try {
+        decodeFromRetrievedData();
+      } finally {
+        TraceCompat.endSection();
+      }
     }
   }
 
@@ -438,12 +461,33 @@ class DecodeJob<R> implements DataFetcherGenerator.FetcherReadyCallback,
     return runLoadPath(data, dataSource, path);
   }
 
+  private Options getOptionsWithHardwareConfig(DataSource dataSource) {
+    Options options = this.options;
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      return options;
+    }
+
+    if (options.get(Downsampler.ALLOW_HARDWARE_CONFIG) != null) {
+      return options;
+    }
+
+    if (dataSource == DataSource.RESOURCE_DISK_CACHE
+        || decodeHelper.isScaleOnlyOrNoTransform()) {
+      options = new Options();
+      options.putAll(this.options);
+      options.set(Downsampler.ALLOW_HARDWARE_CONFIG, true);
+    }
+    return options;
+  }
+
   private <Data, ResourceType> Resource<R> runLoadPath(Data data, DataSource dataSource,
       LoadPath<Data, ResourceType, R> path) throws GlideException {
+    Options options = getOptionsWithHardwareConfig(dataSource);
     DataRewinder<Data> rewinder = glideContext.getRegistry().getRewinder(data);
     try {
-      return path.load(rewinder, options, width, height,
-          new DecodeCallback<ResourceType>(dataSource));
+      // ResourceType in DecodeCallback below is required for compilation to work with gradle.
+      return path.load(
+          rewinder, options, width, height, new DecodeCallback<ResourceType>(dataSource));
     } finally {
       rewinder.cleanup();
     }
@@ -585,11 +629,13 @@ class DecodeJob<R> implements DataFetcherGenerator.FetcherReadyCallback,
     }
 
     void encode(DiskCacheProvider diskCacheProvider, Options options) {
+      TraceCompat.beginSection("DecodeJob.encode");
       try {
         diskCacheProvider.getDiskCache().put(key,
             new DataCacheWriter<>(encoder, toEncode, options));
       } finally {
         toEncode.unlock();
+        TraceCompat.endSection();
       }
     }
 

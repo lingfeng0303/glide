@@ -1,12 +1,16 @@
 package com.bumptech.glide.request.target;
 
+import android.content.Context;
+import android.graphics.Point;
 import android.graphics.drawable.Drawable;
-import android.os.Build;
 import android.support.annotation.Nullable;
+import android.support.annotation.VisibleForTesting;
 import android.util.Log;
+import android.view.Display;
 import android.view.View;
 import android.view.ViewGroup.LayoutParams;
 import android.view.ViewTreeObserver;
+import android.view.WindowManager;
 import com.bumptech.glide.request.Request;
 import com.bumptech.glide.util.Preconditions;
 import com.bumptech.glide.util.Synthetic;
@@ -43,8 +47,12 @@ public abstract class ViewTarget<T extends View, Z> extends BaseTarget<Z> {
   private final SizeDeterminer sizeDeterminer;
 
   public ViewTarget(T view) {
+    this(view, false /*waitForLayout*/);
+  }
+
+  public ViewTarget(T view, boolean waitForLayout) {
     this.view = Preconditions.checkNotNull(view);
-    sizeDeterminer = new SizeDeterminer(view);
+    sizeDeterminer = new SizeDeterminer(view, waitForLayout);
   }
 
   /**
@@ -66,6 +74,11 @@ public abstract class ViewTarget<T extends View, Z> extends BaseTarget<Z> {
   @Override
   public void getSize(SizeReadyCallback cb) {
     sizeDeterminer.getSize(cb);
+  }
+
+  @Override
+  public void removeCallback(SizeReadyCallback cb) {
+    sizeDeterminer.removeCallback(cb);
   }
 
   @Override
@@ -160,20 +173,43 @@ public abstract class ViewTarget<T extends View, Z> extends BaseTarget<Z> {
       ViewTarget.tagId = tagId;
   }
 
-  private static class SizeDeterminer {
+  @VisibleForTesting
+  static final class SizeDeterminer {
     // Some negative sizes (Target.SIZE_ORIGINAL) are valid, 0 is never valid.
     private static final int PENDING_SIZE = 0;
+    @VisibleForTesting
+    @Nullable
+    static Integer maxDisplayLength;
     private final View view;
+    private final boolean waitForLayout;
     private final List<SizeReadyCallback> cbs = new ArrayList<>();
 
     @Nullable private SizeDeterminerLayoutListener layoutListener;
 
-    SizeDeterminer(View view) {
+    SizeDeterminer(View view, boolean waitForLayout) {
       this.view = view;
+      this.waitForLayout = waitForLayout;
+    }
+
+    // Use the maximum to avoid depending on the device's current orientation.
+    private static int getMaxDisplayLength(Context context) {
+      if (maxDisplayLength == null) {
+        WindowManager windowManager =
+            (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        Display display = windowManager.getDefaultDisplay();
+        Point displayDimensions = new Point();
+        display.getSize(displayDimensions);
+        maxDisplayLength = Math.max(displayDimensions.x, displayDimensions.y);
+      }
+      return maxDisplayLength;
     }
 
     private void notifyCbs(int width, int height) {
-      for (SizeReadyCallback cb : cbs) {
+      // One or more callbacks may trigger the removal of one or more additional callbacks, so we
+      // need a copy of the list to avoid a concurrent modification exception. One place this
+      // happens is when a full request completes from the in memory cache while its thumbnail is
+      // still being loaded asynchronously. See #2237.
+      for (SizeReadyCallback cb : new ArrayList<>(cbs)) {
         cb.onSizeReady(width, height);
       }
     }
@@ -214,6 +250,16 @@ public abstract class ViewTarget<T extends View, Z> extends BaseTarget<Z> {
       }
     }
 
+    /**
+     * The callback may be called anyway if it is removed by another {@link SizeReadyCallback} or
+     * otherwise removed while we're notifying the list of callbacks.
+     *
+     * <p>See #2237.
+     */
+    void removeCallback(SizeReadyCallback cb) {
+      cbs.remove(cb);
+    }
+
     void clearCallbacksAndListener() {
       // Keep a reference to the layout listener and remove it here
       // rather than having the observer remove itself because the observer
@@ -230,22 +276,7 @@ public abstract class ViewTarget<T extends View, Z> extends BaseTarget<Z> {
     }
 
     private boolean isViewStateAndSizeValid(int width, int height) {
-      return isViewStateValid() && isSizeValid(width) && isSizeValid(height);
-    }
-
-    private boolean isViewStateValid() {
-      // We consider the view state as valid if the view has
-      // non-null layout params and a non-zero layout width and height.
-      if (view.getLayoutParams() != null
-          && view.getLayoutParams().width > 0
-          && view.getLayoutParams().height > 0) {
-        return true;
-      }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-        return view.isLaidOut();
-      }
-      return !view.isLayoutRequested();
+      return isDimensionValid(width) && isDimensionValid(height);
     }
 
     private int getTargetHeight() {
@@ -263,30 +294,62 @@ public abstract class ViewTarget<T extends View, Z> extends BaseTarget<Z> {
     }
 
     private int getTargetDimen(int viewSize, int paramSize, int paddingSize) {
+      if (waitForLayout && view.isLayoutRequested()) {
+        return PENDING_SIZE;
+      }
+
+      // We consider the View state as valid if the View has non-null layout params and a non-zero
+      // layout params width and height. This is imperfect. We're making an assumption that View
+      // parents will obey their child's layout parameters, which isn't always the case.
+      int adjustedParamSize = paramSize - paddingSize;
+      if (adjustedParamSize > 0) {
+        return adjustedParamSize;
+      }
+
+      // We also consider the View state valid if the View has a non-zero width and height. This
+      // means that the View has gone through at least one layout pass. It does not mean the Views
+      // width and height are from the current layout pass. For example, if a View is re-used in
+      // RecyclerView or ListView, this width/height may be from an old position. In some cases
+      // the dimensions of the View at the old position may be different than the dimensions of the
+      // View in the new position because the LayoutManager/ViewParent can arbitrarily decide to
+      // change them. Nevertheless, in most cases this should be a reasonable choice.
       int adjustedViewSize = viewSize - paddingSize;
-      if (isSizeValid(adjustedViewSize)) {
+      if (adjustedViewSize > 0) {
         return adjustedViewSize;
       }
 
-      if (paramSize == PENDING_SIZE) {
-        return PENDING_SIZE;
+      // Finally we consider the view valid if the layout parameter size is set to wrap_content.
+      // It's difficult for Glide to figure out what to do here. Although Target.SIZE_ORIGINAL is a
+      // coherent choice, it's extremely dangerous and therefore a bad default. If users want the
+      // original image, they can always use .override(Target.SIZE_ORIGINAL). Since wrap_content
+      // may never resolve to a real size unless we load something, we aim for a square whose length
+      // is the largest screen size. That way we're loading something and that something has some
+      // hope of being downsampled to a size that the device can support. We also log a warning that
+      // tries to explain what Glide is doing and why some alternatives are preferable.
+      if (paramSize == LayoutParams.WRAP_CONTENT) {
+        if (Log.isLoggable(TAG, Log.INFO)) {
+          Log.i(TAG, "Glide treats LayoutParams.WRAP_CONTENT as a request for an image the size of"
+              + " this device's screen dimensions. If you want to load the original image and are"
+              + " ok with the corresponding memory cost and OOMs (depending on the input size), use"
+              + " .override(Target.SIZE_ORIGINAL). Otherwise, use LayoutParams.MATCH_PARENT, set"
+              + " layout_width and layout_height to fixed dimension, or use .override() with fixed"
+              + " dimensions.");
+        }
+        return getMaxDisplayLength(view.getContext());
       }
 
-      if (paramSize == LayoutParams.WRAP_CONTENT) {
-        return SIZE_ORIGINAL;
-      } else if (paramSize > 0) {
-        return paramSize - paddingSize;
-      } else {
-        return PENDING_SIZE;
-      }
+      // If the layout parameters are < padding, the view size is < padding, or the layout
+      // parameters are set to match_parent or wrap_content and no layout has occurred, we should
+      // wait for layout and repeat.
+      return PENDING_SIZE;
     }
 
-    private boolean isSizeValid(int size) {
+    private boolean isDimensionValid(int size) {
       return size > 0 || size == SIZE_ORIGINAL;
     }
 
-    private static class SizeDeterminerLayoutListener implements ViewTreeObserver
-        .OnPreDrawListener {
+    private static final class SizeDeterminerLayoutListener
+        implements ViewTreeObserver.OnPreDrawListener {
       private final WeakReference<SizeDeterminer> sizeDeterminerRef;
 
       SizeDeterminerLayoutListener(SizeDeterminer sizeDeterminer) {

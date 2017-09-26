@@ -99,7 +99,7 @@ public class RequestFutureTarget<R> implements FutureTarget<R>,
 
   @Override
   public synchronized boolean isDone() {
-    return isCancelled || resultReceived;
+    return isCancelled || resultReceived || loadFailed;
   }
 
   @Override
@@ -123,6 +123,11 @@ public class RequestFutureTarget<R> implements FutureTarget<R>,
   @Override
   public void getSize(SizeReadyCallback cb) {
     cb.onSizeReady(width, height);
+  }
+
+  @Override
+  public void removeCallback(SizeReadyCallback cb) {
+    // Do nothing because we do not retain references to SizeReadyCallbacks.
   }
 
   /**

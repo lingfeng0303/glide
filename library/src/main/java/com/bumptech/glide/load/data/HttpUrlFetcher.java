@@ -1,5 +1,6 @@
 package com.bumptech.glide.load.data;
 
+import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.Log;
 import com.bumptech.glide.Priority;
@@ -99,6 +100,8 @@ public class HttpUrlFetcher implements DataFetcher<InputStream> {
 
     // Connect explicitly to avoid errors in decoders if connection fails.
     urlConnection.connect();
+    // Set the stream so that it's closed in cleanup to avoid resource leaks. See #2352.
+    stream = urlConnection.getInputStream();
     if (isCancelled) {
       return null;
     }
@@ -111,6 +114,9 @@ public class HttpUrlFetcher implements DataFetcher<InputStream> {
         throw new HttpException("Received empty or null redirect url");
       }
       URL redirectUrl = new URL(url, redirectUrlString);
+      // Closing the stream specifically is required to avoid leaking ResponseBodys in addition
+      // to disconnecting the url connection below. See #2352.
+      cleanup();
       return loadDataWithRedirects(redirectUrl, redirects + 1, url, headers);
     } else if (statusCode == -1) {
       throw new HttpException(statusCode);
@@ -145,6 +151,7 @@ public class HttpUrlFetcher implements DataFetcher<InputStream> {
     if (urlConnection != null) {
       urlConnection.disconnect();
     }
+    urlConnection = null;
   }
 
   @Override
@@ -154,11 +161,13 @@ public class HttpUrlFetcher implements DataFetcher<InputStream> {
     isCancelled = true;
   }
 
+  @NonNull
   @Override
   public Class<InputStream> getDataClass() {
     return InputStream.class;
   }
 
+  @NonNull
   @Override
   public DataSource getDataSource() {
     return DataSource.REMOTE;

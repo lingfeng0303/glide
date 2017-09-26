@@ -42,7 +42,7 @@ public class DecodePath<DataType, ResourceType, Transcode> {
       Options options, DecodeCallback<ResourceType> callback) throws GlideException {
     Resource<ResourceType> decoded = decodeResource(rewinder, width, height, options);
     Resource<ResourceType> transformed = callback.onResourceDecoded(decoded);
-    return transcoder.transcode(transformed);
+    return transcoder.transcode(transformed, options);
   }
 
   private Resource<ResourceType> decodeResource(DataRewinder<DataType> rewinder, int width,
@@ -66,7 +66,9 @@ public class DecodePath<DataType, ResourceType, Transcode> {
           data = rewinder.rewindAndGet();
           result = decoder.decode(data, width, height, options);
         }
-      } catch (IOException e) {
+        // Some decoders throw unexpectedly. If they do, we shouldn't fail the entire load path, but
+        // instead log and continue. See #2406 for an example.
+      } catch (IOException | RuntimeException e) {
         if (Log.isLoggable(TAG, Log.VERBOSE)) {
           Log.v(TAG, "Failed to decode data for " + decoder, e);
         }

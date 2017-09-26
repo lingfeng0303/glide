@@ -1,9 +1,7 @@
 package com.bumptech.glide.samples.flickr;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.Resources;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -12,7 +10,6 @@ import android.os.StrictMode;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
 import android.support.v4.app.FragmentPagerAdapter;
-import android.support.v4.view.MenuItemCompat;
 import android.support.v4.view.ViewPager;
 import android.support.v7.app.AppCompatActivity;
 import android.text.TextUtils;
@@ -23,13 +20,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.SearchView;
 import android.widget.TextView;
-import com.bumptech.glide.Glide;
 import com.bumptech.glide.load.engine.prefill.PreFillType;
 import com.bumptech.glide.request.FutureTarget;
 import com.bumptech.glide.samples.flickr.api.Api;
 import com.bumptech.glide.samples.flickr.api.Photo;
 import com.bumptech.glide.samples.flickr.api.Query;
-import com.bumptech.glide.samples.flickr.api.RecentQuery;
 import com.bumptech.glide.samples.flickr.api.SearchQuery;
 import java.io.File;
 import java.util.ArrayList;
@@ -49,6 +44,7 @@ public class FlickrSearchActivity extends AppCompatActivity
     implements SearchView.OnQueryTextListener {
   private static final String TAG = "FlickrSearchActivity";
   private static final String STATE_QUERY = "state_search_string";
+  private static final Query DEFAULT_QUERY = new SearchQuery("kitten");
 
   private final QueryListener queryListener = new QueryListener();
   private View searching;
@@ -93,8 +89,7 @@ public class FlickrSearchActivity extends AppCompatActivity
     MenuInflater menuInflater = getMenuInflater();
     menuInflater.inflate(R.menu.search_activity, menu);
 
-    searchView =
-        (SearchView) MenuItemCompat.getActionView(menu.findItem(R.id.search));
+    searchView = (SearchView) menu.findItem(R.id.search).getActionView();
     searchView.setSubmitButtonEnabled(true);
     searchView.setIconified(false);
     searchView.setOnQueryTextListener(this);
@@ -146,7 +141,7 @@ public class FlickrSearchActivity extends AppCompatActivity
         executeQuery(savedQuery);
       }
     } else {
-      executeQuery(RecentQuery.get());
+      executeQuery(DEFAULT_QUERY);
     }
 
     int smallGridSize = res.getDimensionPixelSize(R.dimen.small_photo_side);
@@ -157,7 +152,8 @@ public class FlickrSearchActivity extends AppCompatActivity
     if (savedInstanceState == null) {
       // Weight values determined experimentally by measuring the number of incurred GCs while
       // scrolling through the various photo grids/lists.
-      Glide.get(this).preFillBitmapPool(new PreFillType.Builder(smallGridSize).setWeight(1),
+      GlideApp.get(this).preFillBitmapPool(
+          new PreFillType.Builder(smallGridSize).setWeight(1),
           new PreFillType.Builder(mediumGridSize).setWeight(1),
           new PreFillType.Builder(screenWidth / 2, listHeightSize).setWeight(6));
     }
@@ -185,19 +181,6 @@ public class FlickrSearchActivity extends AppCompatActivity
       backgroundThread.quit();
       backgroundThread = null;
     }
-  }
-
-  @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
-  @Override
-  public void onTrimMemory(int level) {
-    super.onTrimMemory(level);
-    Glide.get(this).trimMemory(level);
-  }
-
-  @Override
-  public void onLowMemory() {
-    super.onLowMemory();
-    Glide.get(this).clearMemory();
   }
 
   private void executeSearch(String searchString) {
@@ -284,13 +267,13 @@ public class FlickrSearchActivity extends AppCompatActivity
       super.setPrimaryItem(container, position, object);
       if (position != mLastPosition) {
         if (mLastPosition >= 0) {
-          Glide.with(mLastFragment).pauseRequests();
+          GlideApp.with(mLastFragment).pauseRequests();
         }
         Fragment current = (Fragment) object;
         mLastPosition = position;
         mLastFragment = current;
         if (current.isAdded()) {
-          Glide.with(current).resumeRequests();
+          GlideApp.with(current).resumeRequests();
         }
       }
     }
@@ -349,7 +332,7 @@ public class FlickrSearchActivity extends AppCompatActivity
           return;
         }
 
-        FutureTarget<File> futureTarget = Glide.with(context)
+        FutureTarget<File> futureTarget = GlideApp.with(context)
             .downloadOnly()
             .load(photo)
             .submit(Api.SQUARE_THUMB_SIZE, Api.SQUARE_THUMB_SIZE);
@@ -365,7 +348,7 @@ public class FlickrSearchActivity extends AppCompatActivity
             Log.d(TAG, "Got ExecutionException waiting for background downloadOnly", e);
           }
         }
-        Glide.with(context).clear(futureTarget);
+        GlideApp.with(context).clear(futureTarget);
       }
     }
   }

@@ -142,8 +142,23 @@ public class LruBitmapPool implements BitmapPool {
     return result;
   }
 
+  @TargetApi(Build.VERSION_CODES.O)
+  private static void assertNotHardwareConfig(Bitmap.Config config) {
+    // Avoid short circuiting on sdk int since it breaks on some versions of Android.
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      return;
+    }
+
+    if (config == Bitmap.Config.HARDWARE) {
+      throw new IllegalArgumentException("Cannot create a mutable Bitmap with config: " + config
+          + ". Consider setting Downsampler#ALLOW_HARDWARE_CONFIG to false in your RequestOptions"
+          + " and/or in GlideBuilder.setDefaultRequestOptions");
+    }
+  }
+
   @Nullable
   private synchronized Bitmap getDirtyOrNull(int width, int height, Bitmap.Config config) {
+    assertNotHardwareConfig(config);
     // Config will be null for non public config types, which can lead to transformations naively
     // passing in null as the requested config here. See issue #194.
     final Bitmap result = strategy.get(width, height, config != null ? config : DEFAULT_CONFIG);
@@ -245,11 +260,18 @@ public class LruBitmapPool implements BitmapPool {
     return strategy;
   }
 
+  @TargetApi(Build.VERSION_CODES.O)
   private static Set<Bitmap.Config> getDefaultAllowedConfigs() {
     Set<Bitmap.Config> configs = new HashSet<>();
     configs.addAll(Arrays.asList(Bitmap.Config.values()));
-    if (Build.VERSION.SDK_INT >= 19) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+      // GIFs, among other types, end up with a native Bitmap config that doesn't map to a java
+      // config and is treated as null in java code. On KitKat+ these Bitmaps can be reconfigured
+      // and are suitable for re-use.
       configs.add(null);
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      configs.remove(Bitmap.Config.HARDWARE);
     }
     return Collections.unmodifiableSet(configs);
   }

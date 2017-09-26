@@ -4,6 +4,7 @@ import com.bumptech.glide.annotation.GlideExtension;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+import com.squareup.javapoet.AnnotationSpec;
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.ParameterSpec;
@@ -11,6 +12,7 @@ import com.squareup.javapoet.TypeSpec;
 import java.util.ArrayList;
 import java.util.List;
 import javax.annotation.processing.ProcessingEnvironment;
+import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
@@ -73,6 +75,14 @@ final class GlideGenerator {
 
   private static final String REQUEST_MANAGER_QUALIFIED_NAME =
       "com.bumptech.glide.RequestManager";
+
+  private static final String VISIBLE_FOR_TESTING_QUALIFIED_NAME =
+      "android.support.annotation.VisibleForTesting";
+
+  private static final String SUPPRESS_LINT_PACKAGE_NAME =
+      "android.annotation";
+  private static final String SUPPRESS_LINT_CLASS_NAME =
+      "SuppressLint";
 
   private final ProcessingEnvironment processingEnv;
   private final ProcessorUtil processorUtil;
@@ -144,6 +154,24 @@ final class GlideGenerator {
                     return ParameterSpec.get(input);
                   }
             }));
+
+    TypeElement visibleForTestingType =
+        processingEnv
+            .getElementUtils()
+            .getTypeElement(VISIBLE_FOR_TESTING_QUALIFIED_NAME);
+    for (AnnotationMirror mirror : methodToOverride.getAnnotationMirrors()) {
+      builder.addAnnotation(AnnotationSpec.get(mirror));
+
+      // Suppress a lint warning if we're overriding a VisibleForTesting method.
+      // See #1977.
+      if (mirror.getAnnotationType().asElement().equals(visibleForTestingType)) {
+        builder.addAnnotation(
+            AnnotationSpec.builder(
+                ClassName.get(SUPPRESS_LINT_PACKAGE_NAME, SUPPRESS_LINT_CLASS_NAME))
+                .addMember("value", "$S", "VisibleForTests")
+                .build());
+      }
+    }
 
     boolean returnsValue = element != null;
     if (returnsValue) {

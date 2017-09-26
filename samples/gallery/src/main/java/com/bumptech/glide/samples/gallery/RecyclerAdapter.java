@@ -1,10 +1,9 @@
 package com.bumptech.glide.samples.gallery;
 
-import static com.bumptech.glide.request.RequestOptions.signatureOf;
-
 import android.content.Context;
 import android.graphics.Point;
 import android.graphics.drawable.Drawable;
+import android.support.annotation.NonNull;
 import android.support.v7.widget.RecyclerView;
 import android.view.Display;
 import android.view.LayoutInflater;
@@ -15,9 +14,7 @@ import android.view.WindowManager;
 import android.widget.ImageView;
 import com.bumptech.glide.ListPreloader;
 import com.bumptech.glide.RequestBuilder;
-import com.bumptech.glide.RequestManager;
 import com.bumptech.glide.load.Key;
-import com.bumptech.glide.request.RequestOptions;
 import com.bumptech.glide.signature.MediaStoreSignature;
 import java.util.Collections;
 import java.util.List;
@@ -31,13 +28,13 @@ class RecyclerAdapter extends RecyclerView.Adapter<RecyclerAdapter.ListViewHolde
 
   private final List<MediaStoreData> data;
   private final int screenWidth;
-  private final RequestBuilder<Drawable> requestBuilder;
+  private final GlideRequest<Drawable> requestBuilder;
 
   private int[] actualDimensions;
 
-  RecyclerAdapter(Context context, List<MediaStoreData> data, RequestManager requestManager) {
+  RecyclerAdapter(Context context, List<MediaStoreData> data, GlideRequests glideRequests) {
     this.data = data;
-    requestBuilder = requestManager.asDrawable().apply(RequestOptions.fitCenterTransform());
+    requestBuilder = glideRequests.asDrawable().fitCenter();
 
     setHasStableIds(true);
 
@@ -75,7 +72,7 @@ class RecyclerAdapter extends RecyclerView.Adapter<RecyclerAdapter.ListViewHolde
 
     requestBuilder
         .clone()
-        .apply(signatureOf(signature))
+        .signature(signature)
         .load(current.uri)
         .into(viewHolder.image);
   }
@@ -95,18 +92,20 @@ class RecyclerAdapter extends RecyclerView.Adapter<RecyclerAdapter.ListViewHolde
     return 0;
   }
 
+  @NonNull
   @Override
   public List<MediaStoreData> getPreloadItems(int position) {
     return Collections.singletonList(data.get(position));
   }
 
+  @NonNull
   @Override
   public RequestBuilder<Drawable> getPreloadRequestBuilder(MediaStoreData item) {
     MediaStoreSignature signature =
         new MediaStoreSignature(item.mimeType, item.dateModified, item.orientation);
     return requestBuilder
         .clone()
-        .apply(signatureOf(signature))
+        .signature(signature)
         .load(item.uri);
   }
 

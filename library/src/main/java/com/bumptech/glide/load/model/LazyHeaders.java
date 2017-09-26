@@ -1,5 +1,6 @@
 package com.bumptech.glide.load.model;
 
+import android.support.annotation.VisibleForTesting;
 import android.text.TextUtils;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -99,9 +100,7 @@ public final class LazyHeaders implements Headers {
   @SuppressWarnings("PMD.FieldDeclarationsShouldBeAtStartOfClass")
   public static final class Builder {
     private static final String USER_AGENT_HEADER = "User-Agent";
-    private static final String DEFAULT_USER_AGENT = System.getProperty("http.agent");
-    private static final String ENCODING_HEADER = "Accept-Encoding";
-    private static final String DEFAULT_ENCODING = "identity";
+    private static final String DEFAULT_USER_AGENT = getSanitizedUserAgent();
     private static final Map<String, List<LazyHeaderFactory>> DEFAULT_HEADERS;
 
     // Set Accept-Encoding header to do our best to avoid gzip since it's both inefficient for
@@ -115,15 +114,11 @@ public final class LazyHeaders implements Headers {
             Collections.<LazyHeaderFactory>singletonList(
                 new StringHeaderFactory(DEFAULT_USER_AGENT)));
       }
-      temp.put(ENCODING_HEADER,
-          Collections.<LazyHeaderFactory>singletonList(
-              new StringHeaderFactory(DEFAULT_ENCODING)));
       DEFAULT_HEADERS = Collections.unmodifiableMap(temp);
     }
 
     private boolean copyOnModify = true;
     private Map<String, List<LazyHeaderFactory>> headers = DEFAULT_HEADERS;
-    private boolean isEncodingDefault = true;
     private boolean isUserAgentDefault = true;
 
     /**
@@ -150,8 +145,7 @@ public final class LazyHeaders implements Headers {
      * times </p>
      */
     public Builder addHeader(String key, LazyHeaderFactory factory) {
-      if ((isEncodingDefault && ENCODING_HEADER.equalsIgnoreCase(key))
-          || (isUserAgentDefault && USER_AGENT_HEADER.equalsIgnoreCase(key))) {
+      if (isUserAgentDefault && USER_AGENT_HEADER.equalsIgnoreCase(key)) {
         return setHeader(key, factory);
       }
 
@@ -189,9 +183,6 @@ public final class LazyHeaders implements Headers {
         factories.add(factory);
       }
 
-      if (isEncodingDefault && ENCODING_HEADER.equalsIgnoreCase(key)) {
-        isEncodingDefault = false;
-      }
       if (isUserAgentDefault && USER_AGENT_HEADER.equalsIgnoreCase(key)) {
         isUserAgentDefault = false;
       }
@@ -230,6 +221,31 @@ public final class LazyHeaders implements Headers {
         result.put(entry.getKey(), new ArrayList<>(entry.getValue()));
       }
       return result;
+    }
+
+    /**
+     * Ensures that the default header will pass OkHttp3's checks for header values.
+     *
+     * <p>See #2331.
+     */
+    @VisibleForTesting
+    static String getSanitizedUserAgent() {
+      String defaultUserAgent = System.getProperty("http.agent");
+      if (TextUtils.isEmpty(defaultUserAgent)) {
+        return defaultUserAgent;
+      }
+
+      int length = defaultUserAgent.length();
+      StringBuilder sb = new StringBuilder(defaultUserAgent.length());
+      for (int i = 0; i < length; i++) {
+        char c = defaultUserAgent.charAt(i);
+        if ((c > '\u001f' || c == '\t') && c < '\u007f') {
+          sb.append(c);
+        } else {
+          sb.append('?');
+        }
+      }
+      return sb.toString();
     }
   }
 

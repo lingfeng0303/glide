@@ -13,7 +13,6 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.view.View;
 import com.bumptech.glide.load.engine.DiskCacheStrategy;
-import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
 import com.bumptech.glide.load.resource.gif.GifDrawable;
 import com.bumptech.glide.manager.ConnectivityMonitor;
 import com.bumptech.glide.manager.ConnectivityMonitorFactory;
@@ -22,7 +21,6 @@ import com.bumptech.glide.manager.LifecycleListener;
 import com.bumptech.glide.manager.RequestManagerTreeNode;
 import com.bumptech.glide.manager.RequestTracker;
 import com.bumptech.glide.manager.TargetTracker;
-import com.bumptech.glide.request.BaseRequestOptions;
 import com.bumptech.glide.request.Request;
 import com.bumptech.glide.request.RequestOptions;
 import com.bumptech.glide.request.target.Target;
@@ -66,7 +64,7 @@ public class RequestManager implements LifecycleListener {
   private final ConnectivityMonitor connectivityMonitor;
 
   @NonNull
-  private BaseRequestOptions<?> requestOptions;
+  private RequestOptions requestOptions;
 
   public RequestManager(Glide glide, Lifecycle lifecycle, RequestManagerTreeNode treeNode) {
     this(glide, lifecycle, treeNode, new RequestTracker(), glide.getConnectivityMonitorFactory());
@@ -106,12 +104,12 @@ public class RequestManager implements LifecycleListener {
     glide.registerRequestManager(this);
   }
 
-  protected void setRequestOptions(@NonNull BaseRequestOptions<?> toSet) {
-    this.requestOptions = toSet.clone().autoClone();
+  protected void setRequestOptions(@NonNull RequestOptions toSet) {
+    requestOptions = toSet.clone().autoClone();
   }
 
-  private void updateRequestOptions(BaseRequestOptions<?> toUpdate) {
-    this.requestOptions.apply(toUpdate);
+  private void updateRequestOptions(RequestOptions toUpdate) {
+    requestOptions = requestOptions.apply(toUpdate);
   }
 
   /**
@@ -128,7 +126,7 @@ public class RequestManager implements LifecycleListener {
    *
    * <p>The modified options will only be applied to loads started after this method is called.
    *
-   * @see RequestBuilder#apply(BaseRequestOptions)
+   * @see RequestBuilder#apply(RequestOptions)
    *
    * @return This request manager.
    */
@@ -161,16 +159,24 @@ public class RequestManager implements LifecycleListener {
 
   /**
    * @see android.content.ComponentCallbacks2#onTrimMemory(int)
+   *
+   * @deprecated This method is called automatically by Glide's internals and shouldn't be called
+   * externally.
    */
+  @Deprecated
   public void onTrimMemory(int level) {
-    glide.getGlideContext().onTrimMemory(level);
+    glide.onTrimMemory(level);
   }
 
   /**
    * @see android.content.ComponentCallbacks2#onLowMemory()
+   *
+   * @deprecated This method is called automatically by Glide's internals and shouldn't be called
+   * externally.
    */
+  @Deprecated
   public void onLowMemory() {
-    glide.getGlideContext().onLowMemory();
+    glide.onLowMemory();
   }
 
   /**
@@ -287,8 +293,7 @@ public class RequestManager implements LifecycleListener {
    * @return A new request builder for loading a {@link android.graphics.Bitmap}
    */
   public RequestBuilder<Bitmap> asBitmap() {
-    return as(Bitmap.class).transition(new GenericTransitionOptions<Bitmap>())
-            .apply(DECODE_TYPE_BITMAP);
+    return as(Bitmap.class).apply(DECODE_TYPE_BITMAP);
   }
 
   /**
@@ -305,7 +310,7 @@ public class RequestManager implements LifecycleListener {
    * {@link com.bumptech.glide.load.resource.gif.GifDrawable}.
    */
   public RequestBuilder<GifDrawable> asGif() {
-    return as(GifDrawable.class).transition(new DrawableTransitionOptions()).apply(DECODE_TYPE_GIF);
+    return as(GifDrawable.class).apply(DECODE_TYPE_GIF);
   }
 
   /**
@@ -319,7 +324,7 @@ public class RequestManager implements LifecycleListener {
    * @return A new request builder for loading a {@link Drawable}.
    */
   public RequestBuilder<Drawable> asDrawable() {
-    return as(Drawable.class).transition(new DrawableTransitionOptions());
+    return as(Drawable.class);
   }
 
   /**
@@ -449,8 +454,13 @@ public class RequestManager implements LifecycleListener {
     requestTracker.runRequest(request);
   }
 
-  BaseRequestOptions<?> getDefaultRequestOptions() {
+  RequestOptions getDefaultRequestOptions() {
     return requestOptions;
+  }
+
+  @NonNull
+  <T> TransitionOptions<?, T> getDefaultTransitionOptions(Class<T> transcodeClass) {
+    return glide.getGlideContext().getDefaultTransitionOptions(transcodeClass);
   }
 
   @Override
